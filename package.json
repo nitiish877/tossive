@@ -1,0 +1,105 @@
+{
+  "name": "tossive",
+  "displayName": "Tossive",
+  "description": "AI coding assistant that plans projects, creates folders and files, checks small projects safely, and reviews selected code changes in VS Code.",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nitish877/tossive"
+  },
+  "version": "0.5.0",
+  "publisher": "nitishVishwakarma",
+  "icon": "media/icon.png",
+  "engines": {
+    "vscode": "^1.106.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "tossive",
+    "ai",
+    "code-generation",
+    "assistant",
+    "project-scaffolding"
+  ],
+  "main": "./src/extension.js",
+  "activationEvents": [
+    "onView:tossive.assistant",
+    "onCommand:tossive.openAssistant",
+    "onCommand:tossive.checkBackend",
+    "onCommand:tossive.showLog"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "tossive.openAssistant",
+        "title": "Tossive: Open Code Assistant"
+      },
+      {
+        "command": "tossive.checkBackend",
+        "title": "Tossive: Check Backend Connection"
+      },
+      {
+        "command": "tossive.showLog",
+        "title": "Tossive: Show Log"
+      }
+    ],
+    "viewsContainers": {
+      "secondarySidebar": [
+        {
+          "icon": "media/tossive.svg",
+          "id": "tossive",
+          "title": "Tossive"
+        }
+      ]
+    },
+    "views": {
+      "tossive": [
+        {
+          "id": "tossive.assistant",
+          "name": "Code Assistant",
+          "type": "webview"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Tossive",
+      "properties": {
+        "tossive.backendUrl": {
+          "type": "string",
+          "default": "https://tejas-backed.vercel.app",
+          "markdownDescription": "Base address of the Tossive/Tejas backend, without `/api`. Only change this if you run your own backend (for example `http://localhost:3000`)."
+        },
+        "tossive.check.maxFiles": {
+          "type": "number",
+          "default": 30,
+          "minimum": 1,
+          "maximum": 100,
+          "description": "Largest project (in files) that the safe \"Run & check\" will test."
+        },
+        "tossive.check.maxKilobytes": {
+          "type": "number",
+          "default": 400,
+          "minimum": 10,
+          "maximum": 2000,
+          "description": "Largest project (in KB of source) that the safe \"Run & check\" will test."
+        },
+        "tossive.check.runSeconds": {
+          "type": "number",
+          "default": 15,
+          "minimum": 3,
+          "maximum": 60,
+          "description": "How many seconds the safe check lets a program run before stopping it."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "package": "vsce package --allow-missing-repository --skip-license",
+    "test:sandbox": "node test/sandbox.test.js",
+    "test:diff": "node test/diff.test.js"
+  },
+  "devDependencies": {
+    "@vscode/vsce": "^3.2.1"
+  }
+}
