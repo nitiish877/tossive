@@ -67,7 +67,7 @@
       "properties": {
         "tossive.backendUrl": {
           "type": "string",
-          "default": "https://tejas-backed.vercel.app",
+          "default": "http://localhost.com",
           "markdownDescription": "Base address of the Tossive/Tejas backend, without `/api`. Only change this if you run your own backend (for example `http://localhost:3000`)."
         },
         "tossive.check.maxFiles": {
