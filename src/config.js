@@ -1,7 +1,7 @@
 'use strict';
 const vscode = require('vscode');
 
-const DEFAULT_BACKEND = 'https://tejas-backed.vercel.app';
+const DEFAULT_BACKEND = 'https://localhost.com';
 
 // The backend address can be changed in VS Code settings ("tossive.backendUrl"), e.g. for a local server.
 function backendBase() {
