@@ -31,7 +31,7 @@ Tossive sends your prompt and the text of files you explicitly select to its ser
 
 ## Settings and commands
 
-- `tossive.backendUrl` — base address of the Tossive/Tejas backend (default `https://tejas_backed.vercel.app`, without `/api`). Change it only if you run your own backend.
+- `tossive.backendUrl` — base address of the Tossive/Tejas backend (default `https://localhost.com`, without `/api`). Change it only if you run your own backend.
 - **Tossive: Open Code Assistant** — opens the panel.
 - **Tossive: Show Log** — opens the Tossive output channel with diagnostics for the last requests.
 - `tossive.check.maxFiles` (default 30), `tossive.check.maxKilobytes` (default 400) and `tossive.check.runSeconds` (default 15) — limits of the safe check.
