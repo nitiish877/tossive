@@ -207,7 +207,45 @@ async function buildProject({ root, request, selectedFiles, projectTree, onProgr
     selected.push({ path: file.label, content: new TextDecoder('utf-8', { fatal: false }).decode(bytes) });
   }
   onProgress('Planning requirements, architecture and file structure…');
-  const tree = Array.isArray(projectTree) ? projectTree.slice(0, 1500).join('\n') : selected.map((file) => file.path).join('\n');
+  let tree = Array.isArray(projectTree) ? projectTree.slice(0, 1500).join('\n') : selected.map((file) => file.path).join('\n');
+  const editIntent = /\b(?:change|modify|update|edit|fix|refactor|improve|correct|repair|rewrite|replace|add|remove|delete|adjust|style|restyle|redesign|implement|integrate)\b|(?:badal|sudhar|theek|sahi\s*kar|jod|hata|update\s*kar)/i.test(String(request || ''));
+  // For explicit changes to a project with no manually selected files, load the existing
+  // workspace sources as context so planning can map the request to their real paths.
+  if (selected.length === 0 && editIntent) {
+    const ignored = new Set(['.git', '.vscode', 'node_modules', 'dist', 'build', 'out', '.next', '.venv', '__pycache__', 'coverage']);
+    let discovered = Array.isArray(projectTree) ? projectTree : [];
+    if (!discovered.length) {
+      const walk = async (dir, prefix = '') => {
+        if (discovered.length >= 1500) return;
+        let entries = [];
+        try { entries = await vscode.workspace.fs.readDirectory(dir); } catch { return; }
+        for (const [name, type] of entries) {
+          if (ignored.has(name.toLowerCase())) continue;
+          const rel = prefix ? `${prefix}/${name}` : name;
+          if (type === vscode.FileType.Directory) await walk(vscode.Uri.joinPath(dir, name), rel);
+          else if (type === vscode.FileType.File) discovered.push(rel);
+          if (discovered.length >= 1500) break;
+        }
+      };
+      await walk(root);
+    }
+    const candidates = discovered.filter((item) => typeof item === 'string' && item.trim());
+    const loaded = [];
+    for (const candidate of candidates) {
+      const rel = safePath(candidate.replace(/\\/g, '/'));
+      if (!rel || rel.split('/').some((part) => ignored.has(part.toLowerCase())) || /(^|\/)(?:\.env(?:\..*)?|[^/]*\.lock|package-lock\.json)$/i.test(rel)) continue;
+      try {
+        const uri = vscode.Uri.joinPath(root, ...rel.split('/'));
+        const bytes = await vscode.workspace.fs.readFile(uri);
+        if (bytes.byteLength > MAX_FILE_BYTES || total + bytes.byteLength > MAX_CONTEXT_BYTES) continue;
+        total += bytes.byteLength;
+        loaded.push({ path: rel, content: new TextDecoder('utf-8', { fatal: false }).decode(bytes) });
+      } catch { /* tree entries can include unreadable or non-file paths */ }
+      if (loaded.length >= 40) break;
+    }
+    selected.push(...loaded);
+    tree = candidates.slice(0, 1500).join('\n');
+  }
   const sourceContext = selected.map((file) => `--- Selected project file: ${file.path} ---\n${file.content}\n--- End file ---`).join('\n\n');
   const reviewInstructions = reviewMode
     ? '\nThis is a review of selected existing code. Put a one-sentence overall verdict in summary. In requirements, list every problem you found, one per line, as "path:line - what is wrong and how it is fixed" (at most 10, most important first). Never create new files for a code review. Include only selected existing file paths that need a fix in files, with the purpose describing the fixes. If no selected files need edits, return files as an empty array and say so in summary.'

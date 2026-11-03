@@ -6,7 +6,7 @@
     "type": "git",
     "url": "https://github.com/nitish877/tossive"
   },
-  "version": "0.5.0",
+  "version": "0.5.1",
   "publisher": "nitishVishwakarma",
   "icon": "media/icon.png",
   "engines": {
@@ -94,11 +94,16 @@
       }
     }
   },
-  "scripts": {
-    "package": "vsce package --allow-missing-repository --skip-license",
-    "test:sandbox": "node test/sandbox.test.js",
-    "test:diff": "node test/diff.test.js"
-  },
+"scripts": {
+  "build": "npm run lint",
+  "compile": "npm run lint",
+  "compile:extension": "node --check src/extension.js && node --check src/projectBuilder.js && node --check src/net.js && node --check src/config.js && node --check src/log.js && node --check src/sandbox.js && node --check src/diff.js && node --check src/capabilities.js",
+  "compile:webview": "node --check media/webview.js",
+  "lint": "npm run compile:extension && npm run compile:webview",
+  "package": "vsce package --allow-missing-repository --skip-license",
+  "test:sandbox": "node test/sandbox.test.js",
+  "test:diff": "node test/diff.test.js"
+},
   "devDependencies": {
     "@vscode/vsce": "^3.2.1"
   }
