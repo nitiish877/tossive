@@ -158,6 +158,7 @@ class TossiveViewProvider {
       else if (message?.type === 'cancelPlan') this.resolvePlan(message.requestId, false);
       else if (message?.type === 'runCheck') await this.runCheck(message.requestId);
       else if (message?.type === 'runSandbox') await this.runSandbox(message.requestId);
+      else if (message?.type === 'shareProject') await this.shareWorkspaceProject();
       else if (message?.type === 'openProject') await this.openProject(message.requestId, Boolean(message.browser));
     });
     this.addActiveFile();
@@ -606,6 +607,66 @@ class TossiveViewProvider {
     return selected?.uri || null;
   }
 
+  async shareWorkspaceProject() {
+    const root = await this.chooseWorkspace();
+    if (!root) return;
+    if (!this.authToken) { await this.startLogin(); return; }
+    const mode = await vscode.window.showQuickPick([
+      {label:'Share agent context only',description:'Architecture and project summary; no source files',value:'context'},
+      {label:'Share context + code',description:'Encrypted project bundle for members to download',value:'code'},
+    ],{placeHolder:'Choose what project members can access'});
+    if (!mode) return;
+    const name = await vscode.window.showInputBox({prompt:'Project name shown to invited members',value:require('path').basename(root.fsPath),validateInput:(v)=>v.trim()?null:'Enter a project name.'});
+    if (!name) return;
+    const workspaceKey = require('crypto').createHash('sha256').update(root.fsPath.toLowerCase()).digest('hex').slice(0,40);
+    const exclude = '{**/.git/**,**/.vscode/**,**/node_modules/**,**/dist/**,**/build/**,**/out/**,**/.next/**,**/.venv/**,**/venv/**,**/__pycache__/**,**/.pytest_cache/**,**/coverage/**,**/.cache/**,**/*.log,**/*.vsix,**/*.zip,**/*.png,**/*.jpg,**/*.jpeg,**/*.gif,**/*.ico,**/*.pdf,**/*.lock,**/package-lock.json}';
+    let files=[];
+    const shareStages=[{eventType:'scan_started',details:{phase:'workspace scan'}}];
+    try { await vscode.window.withProgress({location:vscode.ProgressLocation.Notification,title:'Preparing project share…',cancellable:false},async(progress)=>{
+      progress.report({message:'Scanning workspace files'});
+      const uris=await vscode.workspace.findFiles('**/*',exclude,1000);
+      const rows=[];
+      let bytes=0;
+      for(const uri of uris){
+        const rel=vscode.workspace.asRelativePath(uri,false).replace(/\\/g,'/');
+        if (/(^|\/)(?:\.env(?:\..*)?|\.npmrc|\.pypirc)$/i.test(rel)) continue;
+        if(rel.split('/').some((part)=>['node_modules','.git','dist','build','out','.next','.venv','venv','__pycache__','coverage'].includes(part.toLowerCase()))) continue;
+        try { const stat=await vscode.workspace.fs.stat(uri); if(stat.size>200*1024||bytes+stat.size>15*1024*1024) continue; bytes+=stat.size; rows.push({uri,path:rel}); } catch {}
+      }
+      shareStages.push({eventType:'scan_completed',details:{candidateFiles:rows.length,ignoredFolders:['node_modules','.git','dist','build','out','.next','.venv','venv','__pycache__','coverage']}});
+      const selected=await vscode.window.showQuickPick(rows.map(x=>({label:x.path,picked:true,description:'Include'})),{canPickMany:true,placeHolder:'Preview files to include; generated folders and dependencies are excluded by default'});
+      if(!selected?.length&&mode.value==='code') return;
+      const chosen=new Set((selected||[]).map(x=>x.label));
+      const secretPattern=/(?:api[_-]?key|secret|password|token)\s*[:=]\s*["'][^"']{8,}|-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|\b(?:sk-[A-Za-z0-9_-]{20,}|ghp_[A-Za-z0-9]{20,})\b/i;
+      const secretHits=[];
+      if(mode.value==='code') for(const row of rows.filter(x=>chosen.has(x.path))){
+        const content=new TextDecoder().decode(await vscode.workspace.fs.readFile(row.uri));
+        if(secretPattern.test(content)) secretHits.push(row.path);
+        files.push({path:row.path,content});
+      }
+      const envCandidates=uris.filter(uri=>/(^|\\|\/)(\.env(?:\..*)?|\.npmrc|\.pypirc)$/i.test(uri.fsPath));
+      const includeEnv=envCandidates.length?await vscode.window.showWarningMessage(`Found ${envCandidates.length} environment/credential file(s). Include them in the shared code bundle?`,{modal:true},'Include after review'):undefined;
+      if(includeEnv==='Include after review'&&mode.value==='code') for(const uri of envCandidates){
+        const rel=vscode.workspace.asRelativePath(uri,false).replace(/\\/g,'/');
+        if(files.some(f=>f.path===rel)) continue;
+        const content=new TextDecoder().decode(await vscode.workspace.fs.readFile(uri));
+        if(secretPattern.test(content)) secretHits.push(rel);
+        files.push({path:rel,content});
+      }
+      const preview=mode.value==='code'?files.map(f=>f.path):['Project name and shared agent context only','No source code files'];
+      const warning=secretHits.length?`\n\nPotential secrets detected in: ${secretHits.slice(0,10).join(', ')}. Review these files before sharing.`:'';
+      const accepted=await vscode.window.showInformationMessage(`Share “${name.trim()}” as ${mode.label}?\n\n${preview.slice(0,80).join('\n')||'(no code files selected)'}${warning}`,{modal:true},'Accept & Share');
+      if(accepted!=='Accept & Share') { files=[]; return; }
+      shareStages.push({eventType:'preview_approved',details:{shareMode:mode.value,fileCount:files.length,secretWarnings:secretHits.length}});
+      shareStages.push({eventType:'upload_started',details:{shareMode:mode.value}});
+      progress.report({message:'Uploading encrypted share bundle'});
+      const response=await fetch(`${apiRoot()}/extension/projects/share`,{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${this.authToken}`,'X-Tossive-Client':'tossive-extension'},body:JSON.stringify({name:name.trim(),workspaceKey,shareMode:mode.value,context:{summary:`Shared from ${require('path').basename(root.fsPath)}`,filePaths:mode.value==='code'?files.map(f=>f.path):[]},files:mode.value==='code'?files:[],statuses:shareStages})});
+      const payload=await response.json().catch(()=>({}));
+      if(!response.ok) throw new Error(payload.error||`Share failed (HTTP ${response.status}).`);
+      vscode.window.showInformationMessage(`Project shared. Open Colaus → Code Editor → Shared projects to manage members and activity.`);
+    }); } catch(error) { vscode.window.showErrorMessage(error.message||'Could not share this project.'); }
+  }
+
   async generateProject(message, context) {
     const requestId = String(message.requestId || '');
     const root = await this.chooseWorkspace();
@@ -977,7 +1038,7 @@ class TossiveViewProvider {
     const nonce = require('crypto').randomBytes(16).toString('base64');
     const media = (name) => webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'media', name));
     return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';"><link rel="stylesheet" href="${media('webview.css')}"></head><body>
-<header class="topbar"><div class="logo">T</div><div><div class="brand">Tossive</div><div class="sub">Ask, inspect files, or build</div></div><div style="margin-left:auto;display:flex;gap:5px"><button id="auth-action" class="small-button">Sign in / Sign up</button><button id="restore-chat" class="small-button" title="Restore the most recently cleared chat" hidden>Restore chat</button><button id="clear-chat" class="small-button" title="Move this chat to local restore history" hidden>Clear chat</button></div></header><div class="storage-note">Stored on this computer · Auto-clear after 2 days · Restore available for 2 days</div><main id="history" class="history" aria-live="polite"></main>
+<header class="topbar"><div class="logo">T</div><div><div class="brand">Tossive</div><div class="sub">Ask, inspect files, or build</div></div><div style="margin-left:auto;display:flex;gap:5px"><button id="share-project" class="small-button" title="Preview and share this workspace">Share project</button><button id="auth-action" class="small-button">Sign in / Sign up</button><button id="restore-chat" class="small-button" title="Restore the most recently cleared chat" hidden>Restore chat</button><button id="clear-chat" class="small-button" title="Move this chat to local restore history" hidden>Clear chat</button></div></header><div class="storage-note">Stored on this computer · Auto-clear after 2 days · Restore available for 2 days</div><main id="history" class="history" aria-live="polite"></main>
 <section class="composer-wrap"><div class="context-head"><span>Selected files</span><button id="add" class="add" title="Pick project files to give Tossive as context">＋ Add files</button></div><div id="files" class="chips"></div><div class="inputbox"><textarea id="prompt" placeholder="Ask a question, inspect selected files, or describe a project/change…" aria-label="Message Tossive"></textarea><div class="send-row"><select id="mode" class="mode-select" title="Auto answers questions here and builds or edits files only when asked. Task mode always creates or updates files. Chat only answers questions."><option value="auto">Auto</option><option value="build">Task mode</option><option value="chat">Chat only</option></select><span class="hint">Enter to send · Shift+Enter for a new line</span><button id="send" class="send" title="Send message" aria-label="Send" disabled>↑</button></div></div></section>
 <script nonce="${nonce}" src="${media('webview.js')}"></script></body></html>`;
   }

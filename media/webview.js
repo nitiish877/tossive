@@ -5,6 +5,7 @@ const history = document.getElementById('history');
 const promptBox = document.getElementById('prompt');
 const sendButton = document.getElementById('send');
 const clearChatButton = document.getElementById('clear-chat');
+const shareProjectButton = document.getElementById('share-project');
 const restoreChatButton = document.getElementById('restore-chat');
 const authAction = document.getElementById('auth-action');
 const addFilesButton = document.getElementById('add');
@@ -429,6 +430,7 @@ function submit(override, options) {
 
 addFilesButton.onclick = () => api.postMessage({ type: 'addFiles' });
 clearChatButton.onclick = () => api.postMessage({ type: 'clearHistory' });
+if (shareProjectButton) shareProjectButton.onclick = () => api.postMessage({ type: 'shareProject' });
 restoreChatButton.onclick = () => api.postMessage({ type: 'restoreHistory' });
 authAction.onclick = () => { if (!auth.signedIn) api.postMessage({ type: 'login' }); };
 sendButton.onclick = () => submit();
